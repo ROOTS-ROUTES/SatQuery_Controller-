@@ -1,0 +1,23 @@
+transformers==4.46.0    # PINNED — not >=, since a newer transformers can rename internal
+                        # Qwen2-VL module paths and silently break LoRA adapter loading
+                        # (PEFT reports "missing adapter keys" and merges a zero delta).
+                        # If you retrain adapters later, use this exact version too.
+accelerate
+peft
+bitsandbytes    # GPU path only, for the vision tool — see README if this fails to install
+qwen-vl-utils
+torchvision     # required by the Qwen2-VL image processing pipeline (not auto-installed by transformers/peft)
+pillow
+psutil
+huggingface_hub # only used by download_models.py (one-time, online step)
+fastapi
+uvicorn
+gradio          # optional — only needed if you use gradio_app.py instead of the custom frontend
+
+# llama-cpp-python (the brain LLM) is deliberately NOT listed here.
+# PyPI has no prebuilt wheel for it — a plain `pip install` always builds
+# from source, which fails on Windows due to a long-path limit while
+# extracting llama.cpp's bundled web UI assets. run_windows.bat and
+# run_mac_linux.sh install it separately, first, from the maintainer's
+# prebuilt-wheel index, before this file is processed. See README for the
+# manual command if you ever need to run it yourself.

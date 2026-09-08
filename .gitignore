@@ -1,0 +1,45 @@
+# Python environments and caches
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Logs and runtime state
+*.log
+*.pid
+*.sqlite3
+gradio_cached_examples/
+
+# Downloaded model weights and generated model data
+models/*
+!models/.gitkeep
+*.gguf
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
