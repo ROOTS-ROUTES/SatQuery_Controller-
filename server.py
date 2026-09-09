@@ -31,6 +31,7 @@ import threading
 import webbrowser
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
@@ -38,6 +39,25 @@ import uvicorn
 from config import TOOLS
 
 app = FastAPI(title="SatQuery AI")
+
+# --- CORS ---
+# The browser frontend may be served from somewhere other than this machine
+# (e.g. a Vercel deployment) while the controller stays local — cross-origin
+# calls from that page are blocked by browsers unless this middleware answers
+# the preflight. Origins are configurable via SATQUERY_CORS_ORIGINS
+# (comma-separated, e.g. "https://satquery-ai.vercel.app,http://localhost:5173");
+# the default "*" allows any origin, which is right for a local, key-less,
+# non-cookie service. Streaming responses need the exposed header below so
+# the frontend's SSE reader can read Content-Type.
+_cors_origins = os.environ.get("SATQUERY_CORS_ORIGINS", "*").split(",")
+_cors_origins = [o.strip() for o in _cors_origins if o.strip()] or ["*"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Accept"],
+    expose_headers=["Content-Type"],
+)
 
 # --- Background controller loading ---
 # Populated by _load_controller_in_background() shortly after the server
