@@ -43,3 +43,7 @@ Thumbs.db
 dist/
 build/
 *.egg-info/
+
+# Prebuilt offline frontend (built from the SatQuery-AI frontend repo,
+served by server.py; rebuild it there rather than committing the bundle)
+frontend_dist/

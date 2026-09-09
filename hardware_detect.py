@@ -34,18 +34,30 @@ def _detect_gpu():
     """
     Returns (available, name, vram_gb, compute_capability) using torch if
     it's importable with CUDA support; falls back to nvidia-smi parsing
-    if torch isn't available yet at detection time.
+    ONLY when torch isn't installed yet at detection time.
+
+    Important: if torch IS installed but reports no CUDA (e.g. the default
+    CPU wheel), the GPU is treated as unavailable even if nvidia-smi sees
+    it — a CUDA-agnostic torch can't drive the GPU, and routing to the GPU
+    path on such a build is what produces the bitsandbytes "frozenset"
+    crash at generation time. Installing a CUDA torch wheel (see README)
+    is what makes the GPU path valid again.
     """
     try:
         import torch
+    except ImportError:
+        torch = None
+
+    if torch is not None:
         if torch.cuda.is_available():
             name = torch.cuda.get_device_name(0)
             props = torch.cuda.get_device_properties(0)
             vram_gb = props.total_memory / (1024 ** 3)
             capability = torch.cuda.get_device_capability(0)
             return True, name, vram_gb, capability
-    except ImportError:
-        pass
+        # torch present but CPU-only build — don't fall through to nvidia-smi,
+        # its answer would lie to us (hardware present, software can't use it).
+        return False, None, None, None
 
     # Fallback: query nvidia-smi directly (works even before torch is installed).
     try:
@@ -86,7 +98,7 @@ def detect_hardware() -> HardwareProfile:
             f"(< {MIN_VRAM_GB_FOR_GPU_PATH} GB threshold) — routing to CPU path for safety."
         )
     else:
-        reason = "No NVIDIA GPU detected — routing to CPU path."
+        reason = "No usable CUDA GPU detected — routing to CPU path."
 
     return HardwareProfile(
         accelerator="cpu",

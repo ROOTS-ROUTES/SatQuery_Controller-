@@ -224,4 +224,32 @@ MIN_VRAM_GB_FOR_GPU_PATH = 3.0
 MIN_COMPUTE_CAPABILITY_FOR_BF16 = 8
 
 # --- Generation defaults ---
-MAX_NEW_TOKENS = 128
+# One pass now carries both the answer and the structured findings block, so
+# this needs to be a little larger than the original 128 — but not much: on
+# the modest hardware this prototype targets, KV-cache size is the memory
+# ceiling, so keep it tight.
+MAX_NEW_TOKENS = 192
+
+# --- Structured findings prompt ---------------------------------------------
+# The vision tool is asked to return its analysis in a fixed, machine-parseable
+# shape (land-cover fractions, key findings, a preliminary conclusion) rather
+# than free prose. The brain then synthesises those findings into the answer the
+# user actually sees — which is what lets it draw a conclusion instead of just
+# repeating the tool's raw output.
+STRUCTURED_PROMPT = """You are analysing a satellite image for a remote-sensing question.
+Respond with EXACTLY this structure and nothing else:
+
+LAND COVER
+water: <fraction between 0 and 1>
+vegetation: <fraction between 0 and 1>
+bare soil: <fraction between 0 and 1>
+built-up: <fraction between 0 and 1>
+
+KEY FINDINGS
+- <one concise, specific finding>
+- <one concise, specific finding>
+- <one concise, specific finding>
+
+CONCLUSION
+<one or two sentences that directly answer the question, based on the findings>
+"""

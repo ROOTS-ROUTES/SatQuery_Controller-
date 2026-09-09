@@ -35,6 +35,8 @@ from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
+from config import TOOLS
+
 app = FastAPI(title="SatQuery AI")
 
 # --- Background controller loading ---
@@ -45,15 +47,21 @@ controller = None
 controller_load_error = None
 controller_ready = threading.Event()
 
+# Populated by _load_controller_in_background() once the brain LLM is up.
+# Read by GET /api/status so the frontend's adapter panel can show which
+# brain tier loaded and which specialist tools are offered.
+brain_trace = None
+
 
 def _load_controller_in_background():
-    global controller, controller_load_error
+    global controller, controller_load_error, brain_trace
     try:
         print("Loading controller (hardware detection + brain LLM)...")
         from controller import SatQueryController  # imported here, not at module top,
         # so a slow/heavy import doesn't delay the server starting to accept connections.
         controller = SatQueryController()
-        print("Controller ready — brain LLM loaded, vision tool will load on first image query.\n")
+        # controller.brain_trace comes from load_brain_llm() (model file + tier + offload).
+        brain_trace = controller.brain_trace
     except Exception as e:
         controller_load_error = str(e)
         print(f"Controller failed to load: {e}")
@@ -85,13 +93,27 @@ def _sse(token: str) -> str:
 
 @app.get("/api/status")
 async def status():
-    """Polled by nothing on the frontend today (no frontend change needed),
-    but handy to check manually (e.g. curl) while troubleshooting a slow
-    first load."""
+    """Polled by the frontend's adapter panel (src/hooks/useAdapters.ts) to show
+    live controller readiness; also handy to check manually (curl) while
+    troubleshooting a slow first load."""
+    trace = brain_trace or {}
+    tools = [t["spec"]["function"]["name"] for t in TOOLS]
     return {
         "ready": controller_ready.is_set() and controller is not None,
         "loading": not controller_ready.is_set(),
         "error": controller_load_error,
+        "brain": {
+            "tier": trace.get("brain_tier"),
+            "model": trace.get("brain_model"),
+            "gpu_offload": trace.get("brain_gpu_offload"),
+        },
+        "vision_tool": {
+            # The vision tool loads lazily on the first image query — "loaded"
+            # stays false until then, which is expected, not a fault.
+            "loaded": controller is not None and getattr(controller, "_vision_loaded_adapter_key", None) is not None,
+            "adapter": getattr(controller, "_vision_loaded_adapter_key", None),
+        },
+        "tools": tools,
     }
 
 
@@ -155,7 +177,10 @@ def _open_browser_when_ready(url: str, delay_seconds: float = 1.2):
 
 
 if __name__ == "__main__":
-    HOST, PORT = "127.0.0.1", 8000
+    # Env overrides exist for testing / parallel setups; defaults match the
+    # frontend's Vite proxy target (http://localhost:8000).
+    HOST = os.environ.get("SATQUERY_HOST", "127.0.0.1")
+    PORT = int(os.environ.get("SATQUERY_PORT", "8000"))
     # Opens shortly after uvicorn starts accepting connections — NOT after
     # the controller finishes loading, since that now happens in the
     # background thread above instead of blocking here.

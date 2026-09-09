@@ -14,6 +14,7 @@ brain), execute whatever the brain decides, and produce an auditable trace
 of the decision. It does not decide the task itself.
 """
 
+import gc
 import json
 import time
 
@@ -33,8 +34,22 @@ SYSTEM_PROMPT = (
     "You will only be offered tools that are actually valid for the number of images "
     "currently attached, so choose whichever offered tool best matches what the user "
     "is asking; if none of the offered tools fit and no images are relevant to the "
-    "question, answer directly instead. After a tool returns a result, synthesize a "
-    "clear, direct answer for the user — do not just repeat the tool output verbatim."
+    "question, answer directly instead.\n\n"
+    "When a tool returns structured findings (land-cover fractions, a list of key "
+    "findings and a preliminary conclusion), your job is to synthesise them into a "
+    "clear, direct answer for the user. Do not just repeat the tool output verbatim. "
+    "Lead with the conclusion the user actually asked for, then briefly support it "
+    "with the most relevant findings — rank them by importance, not just list them. "
+    "If the findings contradict each other, say so and explain which is more likely. "
+    "If the tool's conclusion is weak or the numbers are small, say so plainly rather "
+    "than overstating what the imagery shows.\n\n"
+    "For open-ended land-use questions — 'can we do farming here?', 'is this site "
+    "suitable for construction?' — the answer must be a verdict with reasoning, not a "
+    "measurement: state Yes / Conditionally / No / Cannot judge from this capture, then "
+    "justify it from the measured land cover (open land vs built-up vs water), list the "
+    "constraints visible in the scene, and close with what must be verified on the "
+    "ground (soil tests, water rights, drainage) that imagery cannot see. Never answer "
+    "such questions with a bare percentage alone."
 )
 
 
@@ -94,8 +109,18 @@ class SatQueryController:
 
         content = [{"type": "image", "image": p} for p in image_paths]
         content.append({"type": "text", "text": prompt})
-        messages = [{"role": "user", "content": content}]
 
+        # One generation, two sections: the answer the user asked for, followed by
+        # the structured findings the brain needs to draw a conclusion. Doing it
+        # in a single pass is what keeps this runnable on the modest hardware this
+        # prototype targets — a second generate() doubles the memory footprint.
+        full_prompt = (
+            f"{prompt}\n\n"
+            "Then provide your analysis in this exact structured format:\n\n"
+            + STRUCTURED_PROMPT
+        )
+        content[-1] = {"type": "text", "text": full_prompt}
+        messages = [{"role": "user", "content": content}]
         text = self.vision_processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         image_inputs, _ = process_vision_info(messages)
         inputs = self.vision_processor(text=[text], images=image_inputs, padding=True, return_tensors="pt")
@@ -103,10 +128,23 @@ class SatQueryController:
             inputs = inputs.to(self.vision_model.device)
 
         output_ids = self.vision_model.generate(**inputs, max_new_tokens=MAX_NEW_TOKENS)
-        answer = self.vision_processor.batch_decode(output_ids, skip_special_tokens=True)[0]
-        return answer, prompt
+        raw = self.vision_processor.batch_decode(output_ids, skip_special_tokens=True)[0]
+        # Drop the vision tensors before the brain's second pass — on the modest
+        # hardware this prototype targets, keeping them around is what tips
+        # the process over its memory ceiling.
+        del inputs, output_ids
+        gc.collect()
+
+        # The answer is everything before the structured section; the findings
+        # are parsed out of the tail. Split on the marker the model is told to
+        # emit, falling back to the whole output if it didn't.
+        raw_answer, structured_raw = _split_answer_and_findings(raw)
+        findings = _parse_findings(structured_raw)
+
+        return raw_answer, prompt, findings
 
     def run_query(self, image_paths, query: str):
+        """Runs one user query through the brain + whatever tool it picks."""
         start_time = time.time()
         check_compatibility(image_paths)
 
@@ -152,15 +190,30 @@ class SatQueryController:
 
             if validation_error:
                 tool_result_content = f"Error: {validation_error}"
+                findings = None
             else:
-                vision_answer, vision_prompt_sent = self._execute_tool(chosen_tool_name, args, image_paths)
-                tool_result_content = vision_answer
+                vision_answer, vision_prompt_sent, findings = self._execute_tool(chosen_tool_name, args, image_paths)
+                # Hand the brain the structured findings — land-cover fractions,
+                # key findings and the vision model's own preliminary conclusion —
+                # so it can synthesise a real conclusion rather than working from
+                # free prose alone. The raw answer is included too, in case the
+                # structured pass came back empty.
+                if findings:
+                    tool_result_content = (
+                        "STRUCTURED FINDINGS:\n"
+                        + json.dumps(findings, indent=2)
+                        + "\n\nRAW VISION ANSWER:\n"
+                        + vision_answer
+                    )
+                else:
+                    tool_result_content = vision_answer
 
             tool_call_info = {
                 "tool": chosen_tool_name,
                 "arguments": args,
                 "result": tool_result_content,
                 "validation_error": validation_error,
+                "structured_findings": findings,
             }
 
             messages.append(msg)
@@ -187,3 +240,50 @@ class SatQueryController:
             "latency_seconds": round(elapsed, 2),
         }
         return final_answer, execution_trace
+
+
+def _split_answer_and_findings(raw: str):
+    """Splits the vision model's single output into the free-form answer and the
+    structured tail. The structured prompt starts with the literal marker
+    'LAND COVER', so anything from that heading onward is findings."""
+    marker = "LAND COVER"
+    idx = raw.find(marker)
+    if idx < 0:
+        return raw.strip(), raw
+    return raw[:idx].strip(), raw[idx:]
+
+
+def _parse_findings(raw: str):
+    """Parses the structured tail into fractions / findings / conclusion. Best
+    effort — if the model didn't emit the shape, the caller gets nulls and falls
+    back to the raw answer alone."""
+    fractions = {}
+    findings = []
+    conclusion = None
+    section = None
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        upper = line.upper()
+        if upper in ("LAND COVER", "KEY FINDINGS", "CONCLUSION"):
+            section = upper
+            continue
+        if section == "LAND COVER" and ":" in line:
+            key, _, value = line.partition(":")
+            key = key.strip().lower()
+            value = value.strip()
+            if key in ("water", "vegetation", "bare soil", "built-up"):
+                try:
+                    fractions[key] = float(value)
+                except ValueError:
+                    pass
+        elif section == "KEY FINDINGS" and line.startswith("-"):
+            findings.append(line.lstrip("-").strip())
+        elif section == "CONCLUSION":
+            conclusion = (conclusion + " " + line).strip() if conclusion else line
+
+    if not fractions and not findings and not conclusion:
+        return None
+    return {"fractions": fractions, "findings": findings, "conclusion": conclusion}
+

@@ -119,6 +119,34 @@ this, the brain still works — it just always runs on CPU regardless of
 The frontend is already built (`frontend_dist/`) and included — no Node.js
 needed on the target machine.
 
+## Moving to another device (or cloning this repo from GitHub)
+
+The code in this repo is everything *except* the model weights — `models/`
+(~7.4 GB), `venv/`, and the prebuilt `frontend_dist/` bundle are
+intentionally not committed. After cloning (or copying the folder), do this:
+
+**Re-downloadable — run once with internet** (`download_models.py` fetches
+them from Hugging Face into `models/`):
+1. `models/vision_tool_base_model/` — Qwen/Qwen2-VL-2B-Instruct
+2. `models/brain_llm/` — both Qwen2.5 GGUF tiers (CPU + GPU)
+
+**NOT re-downloadable — must be copied from a machine that has them**
+(pendrive, Drive, etc.):
+- `models/backbone_adapter/` — the remote-sensing domain-adaptation LoRA
+- `models/vqa_adapter/` — the fine-tuned VQA task LoRA
+
+These two folders are *your fine-tuned weights*; `download_models.py` can
+only fetch public base models. Without them the vision tool silently runs
+on the base Qwen2-VL model instead (worse answers — no fine-tuning).
+
+**The frontend bundle:** `frontend_dist/` is served by `server.py` but not
+committed. Either copy it from an existing machine, or rebuild it from the
+[SatQuery-AI frontend repo](https://github.com/ROOTS-ROUTES/SatQuery-AI):
+`npm install && npm run build`, then copy `dist/*` into `frontend_dist/`.
+
+Then run the launcher once (`run_windows.bat` / `run_mac_linux.sh`) — it
+creates the `venv/` and installs packages automatically on first run.
+
 ## Running it (fully offline, any machine, from here on)
 
 - **Windows**: double-click `run_windows.bat`
