@@ -26,12 +26,20 @@ gradio_cached_examples/
 # Downloaded model weights and generated model data
 models/*
 !models/.gitkeep
+!models/backbone_adapter
+!models/vqa_adapter
 *.gguf
 *.safetensors
 *.bin
 *.pt
 *.pth
 *.ckpt
+
+# ...but DO version the fine-tuned LoRA adapters — the irreplaceable
+# fine-tuned weights. Big .safetensors files go through Git LFS (see
+# .gitattributes); tokenizer/config files stay as plain git.
+!models/backbone_adapter/**
+!models/vqa_adapter/**
 
 # OS and editor files
 .DS_Store

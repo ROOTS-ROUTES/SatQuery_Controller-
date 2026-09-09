@@ -121,23 +121,28 @@ needed on the target machine.
 
 ## Moving to another device (or cloning this repo from GitHub)
 
-The code in this repo is everything *except* the model weights — `models/`
-(~7.4 GB), `venv/`, and the prebuilt `frontend_dist/` bundle are
-intentionally not committed. After cloning (or copying the folder), do this:
+The code in this repo is everything *except* the public model weights and
+the environment — `models/brain_llm/`, `models/vision_tool_base_model/`,
+`venv/`, and the prebuilt `frontend_dist/` bundle are intentionally not
+committed (the fine-tuned LoRA adapters under `models/` **are** included,
+via Git LFS). After cloning (or copying the folder), do this:
 
 **Re-downloadable — run once with internet** (`download_models.py` fetches
 them from Hugging Face into `models/`):
 1. `models/vision_tool_base_model/` — Qwen/Qwen2-VL-2B-Instruct
 2. `models/brain_llm/` — both Qwen2.5 GGUF tiers (CPU + GPU)
 
-**NOT re-downloadable — must be copied from a machine that has them**
-(pendrive, Drive, etc.):
+**Backed up via Git LFS in this repo** — the fine-tuned LoRA adapters:
 - `models/backbone_adapter/` — the remote-sensing domain-adaptation LoRA
 - `models/vqa_adapter/` — the fine-tuned VQA task LoRA
 
-These two folders are *your fine-tuned weights*; `download_models.py` can
-only fetch public base models. Without them the vision tool silently runs
-on the base Qwen2-VL model instead (worse answers — no fine-tuning).
+These are the irreplaceable weights (`download_models.py` can only fetch
+public base models; without the LoRAs the vision tool silently runs on the
+base Qwen2-VL model — worse answers, no fine-tuning). They travel with the
+clone via Git LFS, so **install [git-lfs](https://git-lfs.com) before
+cloning** (a plain clone without git-lfs leaves tiny pointer files in place
+of the weights — run `git lfs pull` after installing it to fetch them).
+Copying the folders from an existing machine by pendrive works too.
 
 **The frontend bundle:** `frontend_dist/` is served by `server.py` but not
 committed. Either copy it from an existing machine, or rebuild it from the
